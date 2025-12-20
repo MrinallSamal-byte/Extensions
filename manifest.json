@@ -5,7 +5,8 @@
   "description": "A lightweight grammar and writing assistant for personal learning and experimentation.",
   "permissions": [
     "clipboardWrite",
-    "clipboardRead"
+    "clipboardRead",
+    "storage"
   ],
   "host_permissions": [
     "https://openrouter.ai/*",
