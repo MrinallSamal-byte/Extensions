@@ -40,7 +40,8 @@ document.addEventListener('copy', (event) => {
       }
     );
   } catch (error) {
-    // On error, try to copy text if available (use copiedText from outer scope if originalText not set)
+    // On error, try to copy text if available
+    // originalText is set early in the try block if selection was successful
     if (event.clipboardData) {
       const textToCopy = originalText || (window.getSelection() && window.getSelection().toString()) || '';
       if (textToCopy) {
