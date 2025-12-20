@@ -26,13 +26,13 @@ document.addEventListener('copy', (event) => {
       },
       (response) => {
         if (chrome.runtime.lastError) {
-          // If there's an error communicating with background, original text is already in clipboard
+          // If there's an error communicating with background, original text is already in clipboard (set via event.clipboardData.setData() on line 19)
           return;
         }
         
         if (response && response.success && response.processedText) {
           // Try to update clipboard with processed text
-          // This may fail if document loses focus, but that's okay - original text is already copied
+          // This may fail if document loses focus, but that's okay - original text is already copied via event.clipboardData.setData()
           navigator.clipboard.writeText(response.processedText).catch(() => {
             // Silently fail - user already has original text in clipboard
           });
@@ -40,10 +40,13 @@ document.addEventListener('copy', (event) => {
       }
     );
   } catch (error) {
-    // On error, try to copy original text if available
-    if (event.clipboardData && originalText) {
-      event.clipboardData.setData('text/plain', originalText);
-      event.preventDefault();
+    // On error, try to copy text if available (use copiedText from outer scope if originalText not set)
+    if (event.clipboardData) {
+      const textToCopy = originalText || (window.getSelection() && window.getSelection().toString()) || '';
+      if (textToCopy) {
+        event.clipboardData.setData('text/plain', textToCopy);
+        event.preventDefault();
+      }
     }
   }
 });
