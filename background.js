@@ -1,15 +1,16 @@
 const API_KEY = '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';
 const API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 
+// Models ordered by coding capability - best coding models first
 const MODELS = [
-  'mistralai/devstral-2512:free',
-  'kwaipilot/kat-coder-pro:free',
-  'allenai/olmo-3.1-32b-think:free',
-  'nvidia/nemotron-3-nano-30b-a3b:free',
-  'nex-agi/deepseek-v3.1-nex-n1:free',
-  'allenai/olmo-3-32b-think:free',
-  'openai/gpt-oss-120b:free',
   'qwen/qwen3-coder:free',
+  'kwaipilot/kat-coder-pro:free',
+  'mistralai/devstral-2512:free',
+  'nex-agi/deepseek-v3.1-nex-n1:free',
+  'openai/gpt-oss-120b:free',
+  'allenai/olmo-3.1-32b-think:free',
+  'allenai/olmo-3-32b-think:free',
+  'nvidia/nemotron-3-nano-30b-a3b:free',
   'openai/gpt-oss-20b:free'
 ];
 
@@ -29,10 +30,7 @@ async function processTextWithAPI(text) {
     return Math.min(RETRY_DELAY_MS * Math.pow(2, attempt), MAX_RETRY_DELAY_MS);
   }
   
-  const modelIndex = Math.floor(Math.random() * MODELS.length);
-  const selectedModel = MODELS[modelIndex];
-  
-  async function callWithRetry(attempt = 0) {
+  async function callWithModel(model, retryAttempt = 0) {
     try {
       const response = await fetch(API_URL, {
         method: 'POST',
@@ -43,7 +41,7 @@ async function processTextWithAPI(text) {
           'X-Title': 'Gramerly Extension'
         },
         body: JSON.stringify({
-          model: selectedModel,
+          model: model,
           messages: [
             {
               role: 'user',
@@ -55,10 +53,10 @@ async function processTextWithAPI(text) {
         })
       });
       
-      if (response.status === 429 && attempt < MAX_RETRIES) {
+      if (response.status === 429 && retryAttempt < MAX_RETRIES) {
         // Exponential backoff with a maximum delay cap
-        await delay(getBackoffDelay(attempt));
-        return callWithRetry(attempt + 1);
+        await delay(getBackoffDelay(retryAttempt));
+        return callWithModel(model, retryAttempt + 1);
       }
       
       if (!response.ok) {
@@ -82,16 +80,27 @@ async function processTextWithAPI(text) {
       
       throw new Error('Invalid API response format');
     } catch (error) {
-      if (error instanceof TypeError && attempt < MAX_RETRIES) {
-        await delay(getBackoffDelay(attempt));
-        return callWithRetry(attempt + 1);
+      if (error instanceof TypeError && retryAttempt < MAX_RETRIES) {
+        await delay(getBackoffDelay(retryAttempt));
+        return callWithModel(model, retryAttempt + 1);
       }
-      console.error('API processing error:', error);
       throw error;
     }
   }
   
-  return callWithRetry();
+  // Try models in order (best coding models first), fall back to next if one fails
+  for (let i = 0; i < MODELS.length; i++) {
+    try {
+      return await callWithModel(MODELS[i]);
+    } catch (error) {
+      console.error(`Model ${MODELS[i]} failed:`, error.message);
+      // If this is the last model, throw the error
+      if (i === MODELS.length - 1) {
+        throw error;
+      }
+      // Otherwise, try the next model
+    }
+  }
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
