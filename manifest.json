@@ -8,7 +8,8 @@
     "clipboardRead"
   ],
   "host_permissions": [
-    "https://openrouter.ai/*"
+    "https://openrouter.ai/*",
+    "https://api-inference.huggingface.co/*"
   ],
   "background": {
     "service_worker": "background.js"

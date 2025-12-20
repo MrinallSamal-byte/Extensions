@@ -1,6 +1,6 @@
 let originalText = '';
 
-document.addEventListener('copy', async (event) => {
+document.addEventListener('copy', (event) => {
   try {
     const selection = window.getSelection();
     const copiedText = selection.toString();
@@ -11,33 +11,43 @@ document.addEventListener('copy', async (event) => {
     
     originalText = copiedText;
     
+    // Prevent default copy behavior
     event.preventDefault();
     
+    // Set the original text to clipboard immediately using clipboardData
+    // This works synchronously and doesn't require document focus
+    event.clipboardData.setData('text/plain', copiedText);
+    
+    // Process text in background and update clipboard if we can
     chrome.runtime.sendMessage(
       {
         action: 'processText',
         text: copiedText
       },
-      async (response) => {
+      (response) => {
         if (chrome.runtime.lastError) {
-          await navigator.clipboard.writeText(originalText);
+          // If there's an error communicating with background, original text is already in clipboard (set via event.clipboardData.setData() on line 19)
           return;
         }
         
         if (response && response.success && response.processedText) {
-          try {
-            await navigator.clipboard.writeText(response.processedText);
-          } catch (clipboardError) {
-            await navigator.clipboard.writeText(originalText);
-          }
-        } else {
-          await navigator.clipboard.writeText(originalText);
+          // Try to update clipboard with processed text
+          // This may fail if document loses focus, but that's okay - original text is already copied via event.clipboardData.setData()
+          navigator.clipboard.writeText(response.processedText).catch(() => {
+            // Silently fail - user already has original text in clipboard
+          });
         }
       }
     );
   } catch (error) {
-    if (originalText) {
-      navigator.clipboard.writeText(originalText).catch(() => {});
+    // On error, try to copy text if available
+    // originalText is set early in the try block if selection was successful
+    if (event.clipboardData) {
+      const textToCopy = originalText || (window.getSelection() && window.getSelection().toString()) || '';
+      if (textToCopy) {
+        event.clipboardData.setData('text/plain', textToCopy);
+        event.preventDefault();
+      }
     }
   }
 });
