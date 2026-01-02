@@ -1,9 +1,6 @@
-const OPENROUTER_API_KEY = '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';
+// API keys are now stored in Chrome storage for security
+// Users need to configure their own API keys via the extension options
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
-
-// Hugging Face API fallback - API key provided by user for fallback functionality
-// Note: In production, consider using Chrome storage API or environment variables for API keys
-const HUGGINGFACE_API_KEY = ['hf_xZTxMoQKbSv', 'UrwdYZpomUKutuFQoIKQEQa'].join('');
 const HUGGINGFACE_API_URL = 'https://api-inference.huggingface.co/models';
 
 // OpenRouter Models ordered by coding capability - best coding models first
@@ -39,11 +36,19 @@ function delay(ms) {
 }
 
 async function processTextWithAPI(text) {
+  // Retrieve API keys from Chrome storage
+  const storage = await chrome.storage.local.get(['openrouterApiKey', 'huggingfaceApiKey']);
+  const OPENROUTER_API_KEY = storage.openrouterApiKey;
+  const HUGGINGFACE_API_KEY = storage.huggingfaceApiKey;
+
   function getBackoffDelay(attempt) {
     return Math.min(RETRY_DELAY_MS * Math.pow(2, attempt), MAX_RETRY_DELAY_MS);
   }
   
   async function callOpenRouter(model, retryAttempt = 0) {
+    if (!OPENROUTER_API_KEY) {
+      throw new Error('OpenRouter API key not configured. Please set it in extension options.');
+    }
     try {
       const response = await fetch(OPENROUTER_API_URL, {
         method: 'POST',
@@ -102,6 +107,9 @@ async function processTextWithAPI(text) {
   }
   
   async function callHuggingFace(model, retryAttempt = 0) {
+    if (!HUGGINGFACE_API_KEY) {
+      throw new Error('Hugging Face API key not configured. Please set it in extension options.');
+    }
     try {
       const response = await fetch(`${HUGGINGFACE_API_URL}/${model}`, {
         method: 'POST',
@@ -158,30 +166,37 @@ async function processTextWithAPI(text) {
     }
   }
   
-  // Try OpenRouter models first (best coding models first)
-  for (let i = 0; i < OPENROUTER_MODELS.length; i++) {
-    try {
-      return await callOpenRouter(OPENROUTER_MODELS[i]);
-    } catch (error) {
-      console.error(`OpenRouter model ${OPENROUTER_MODELS[i]} failed:`, error.message);
-      // Continue to next model
+  // Try OpenRouter models first (best coding models first) if API key is configured
+  if (OPENROUTER_API_KEY) {
+    for (let i = 0; i < OPENROUTER_MODELS.length; i++) {
+      try {
+        return await callOpenRouter(OPENROUTER_MODELS[i]);
+      } catch (error) {
+        console.error(`OpenRouter model ${OPENROUTER_MODELS[i]} failed:`, error.message);
+        // Continue to next model
+      }
     }
   }
   
-  // If all OpenRouter models fail, fall back to Hugging Face models
-  console.log('All OpenRouter models failed, trying Hugging Face models...');
-  for (let i = 0; i < HUGGINGFACE_MODELS.length; i++) {
-    try {
-      return await callHuggingFace(HUGGINGFACE_MODELS[i]);
-    } catch (error) {
-      console.error(`Hugging Face model ${HUGGINGFACE_MODELS[i]} failed:`, error.message);
-      // If this is the last model, throw the error
-      if (i === HUGGINGFACE_MODELS.length - 1) {
-        throw error;
+  // If all OpenRouter models fail or no key is configured, fall back to Hugging Face models
+  if (HUGGINGFACE_API_KEY) {
+    console.log(OPENROUTER_API_KEY ? 'All OpenRouter models failed, trying Hugging Face models...' : 'No OpenRouter API key configured, using Hugging Face models...');
+    for (let i = 0; i < HUGGINGFACE_MODELS.length; i++) {
+      try {
+        return await callHuggingFace(HUGGINGFACE_MODELS[i]);
+      } catch (error) {
+        console.error(`Hugging Face model ${HUGGINGFACE_MODELS[i]} failed:`, error.message);
+        // If this is the last model, throw the error
+        if (i === HUGGINGFACE_MODELS.length - 1) {
+          throw error;
+        }
+        // Otherwise, try the next model
       }
-      // Otherwise, try the next model
     }
   }
+  
+  // If we reach here, no API keys are configured
+  throw new Error('No API keys configured. Please configure at least one API key (OpenRouter or Hugging Face) in extension options.');
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
