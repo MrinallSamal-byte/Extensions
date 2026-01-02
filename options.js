@@ -26,26 +26,34 @@ document.getElementById('optionsForm').addEventListener('submit', async (e) => {
   
   // Save to Chrome storage
   try {
+    // Get current storage to check what exists
+    const currentStorage = await chrome.storage.local.get(['openrouterApiKey', 'huggingfaceApiKey']);
     const dataToSave = {};
+    const keysToRemove = [];
     
     // Only save non-empty API keys
     if (openrouterApiKey) {
       dataToSave.openrouterApiKey = openrouterApiKey;
-    } else {
-      // Remove the key from storage if it's empty
-      await chrome.storage.local.remove('openrouterApiKey');
+    } else if (currentStorage.openrouterApiKey) {
+      // Only remove the key from storage if it existed
+      keysToRemove.push('openrouterApiKey');
     }
     
     if (huggingfaceApiKey) {
       dataToSave.huggingfaceApiKey = huggingfaceApiKey;
-    } else {
-      // Remove the key from storage if it's empty
-      await chrome.storage.local.remove('huggingfaceApiKey');
+    } else if (currentStorage.huggingfaceApiKey) {
+      // Only remove the key from storage if it existed
+      keysToRemove.push('huggingfaceApiKey');
     }
     
     // Save non-empty keys to storage
     if (Object.keys(dataToSave).length > 0) {
       await chrome.storage.local.set(dataToSave);
+    }
+    
+    // Remove empty keys from storage
+    if (keysToRemove.length > 0) {
+      await chrome.storage.local.remove(keysToRemove);
     }
     
     showStatus('Settings saved successfully!', 'success');
