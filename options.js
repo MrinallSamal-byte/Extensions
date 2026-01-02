@@ -26,10 +26,27 @@ document.getElementById('optionsForm').addEventListener('submit', async (e) => {
   
   // Save to Chrome storage
   try {
-    await chrome.storage.local.set({
-      openrouterApiKey: openrouterApiKey,
-      huggingfaceApiKey: huggingfaceApiKey
-    });
+    const dataToSave = {};
+    
+    // Only save non-empty API keys
+    if (openrouterApiKey) {
+      dataToSave.openrouterApiKey = openrouterApiKey;
+    } else {
+      // Remove the key from storage if it's empty
+      await chrome.storage.local.remove('openrouterApiKey');
+    }
+    
+    if (huggingfaceApiKey) {
+      dataToSave.huggingfaceApiKey = huggingfaceApiKey;
+    } else {
+      // Remove the key from storage if it's empty
+      await chrome.storage.local.remove('huggingfaceApiKey');
+    }
+    
+    // Save non-empty keys to storage
+    if (Object.keys(dataToSave).length > 0) {
+      await chrome.storage.local.set(dataToSave);
+    }
     
     showStatus('Settings saved successfully!', 'success');
   } catch (error) {

@@ -176,19 +176,23 @@ async function processTextWithAPI(text) {
     }
   }
   
-  // If all OpenRouter models fail, fall back to Hugging Face models
-  console.log('All OpenRouter models failed, trying Hugging Face models...');
-  for (let i = 0; i < HUGGINGFACE_MODELS.length; i++) {
-    try {
-      return await callHuggingFace(HUGGINGFACE_MODELS[i]);
-    } catch (error) {
-      console.error(`Hugging Face model ${HUGGINGFACE_MODELS[i]} failed:`, error.message);
-      // If this is the last model, throw the error
-      if (i === HUGGINGFACE_MODELS.length - 1) {
-        throw error;
+  // If all OpenRouter models fail, fall back to Hugging Face models (only if API key is configured)
+  if (HUGGINGFACE_API_KEY) {
+    console.log('All OpenRouter models failed, trying Hugging Face models...');
+    for (let i = 0; i < HUGGINGFACE_MODELS.length; i++) {
+      try {
+        return await callHuggingFace(HUGGINGFACE_MODELS[i]);
+      } catch (error) {
+        console.error(`Hugging Face model ${HUGGINGFACE_MODELS[i]} failed:`, error.message);
+        // If this is the last model, throw the error
+        if (i === HUGGINGFACE_MODELS.length - 1) {
+          throw error;
+        }
+        // Otherwise, try the next model
       }
-      // Otherwise, try the next model
     }
+  } else {
+    throw new Error('All OpenRouter models failed and no Hugging Face API key is configured. Please configure at least one API key in extension options.');
   }
 }
 
