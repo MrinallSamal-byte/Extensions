@@ -38,7 +38,7 @@ function fetchWithTimeout(url, options, timeoutMs = FETCH_TIMEOUT_MS) {
     .finally(() => clearTimeout(timeoutId));
 }
 
-function cleanCodeResponse(text) {
+function stripMarkdownCodeBlocks(text) {
   return text
     .replace(/```python\n?/g, '')
     .replace(/```\n?/g, '')
@@ -101,7 +101,7 @@ async function processTextWithAPI(text) {
       const data = await response.json();
 
       if (data.choices && data.choices.length > 0 && data.choices[0].message) {
-        return cleanCodeResponse(data.choices[0].message.content);
+        return stripMarkdownCodeBlocks(data.choices[0].message.content);
       }
 
       throw new Error('Invalid API response format');
@@ -159,7 +159,7 @@ async function processTextWithAPI(text) {
       const data = await response.json();
 
       if (Array.isArray(data) && data.length > 0 && data[0].generated_text) {
-        return cleanCodeResponse(data[0].generated_text);
+        return stripMarkdownCodeBlocks(data[0].generated_text);
       }
 
       throw new Error('Invalid Hugging Face API response format');
