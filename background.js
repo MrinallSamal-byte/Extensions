@@ -3,54 +3,64 @@
 const OPENROUTER_API_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const HUGGINGFACE_API_URL = 'https://api-inference.huggingface.co/models';
 
-// OpenRouter Models ordered by coding capability - best coding models first
+// OpenRouter Models ordered by coding capability - top models only for fast fallback
 const OPENROUTER_MODELS = [
   'qwen/qwen3-coder:free',
   'kwaipilot/kat-coder-pro:free',
-  'mistralai/devstral-2512:free',
-  'nex-agi/deepseek-v3.1-nex-n1:free',
-  'openai/gpt-oss-120b:free',
-  'allenai/olmo-3.1-32b-think:free',
-  'allenai/olmo-3-32b-think:free',
-  'nvidia/nemotron-3-nano-30b-a3b:free',
-  'openai/gpt-oss-20b:free'
+  'mistralai/devstral-2512:free'
 ];
 
-// Hugging Face Models - best coding models
+// Hugging Face Models - top coding models only
 const HUGGINGFACE_MODELS = [
   'Qwen/Qwen2.5-Coder-32B-Instruct',
-  'bigcode/starcoder2-15b',
-  'codellama/CodeLlama-34b-Instruct-hf',
-  'microsoft/phi-2'
+  'bigcode/starcoder2-15b'
 ];
 
 /** Maximum number of retry attempts for rate-limited requests. */
-const MAX_RETRIES = 3;
+const MAX_RETRIES = 2;
 /** Base delay in milliseconds for exponential backoff (RETRY_DELAY_MS * 2^attempt). */
 const RETRY_DELAY_MS = 500;
 /** Maximum allowed delay between retries in milliseconds. */
-const MAX_RETRY_DELAY_MS = 10000;
+const MAX_RETRY_DELAY_MS = 5000;
+/** Timeout for individual fetch requests in milliseconds. */
+const FETCH_TIMEOUT_MS = 15000;
+/** Timeout for overall processing across all models in milliseconds. */
+const OVERALL_TIMEOUT_MS = 30000;
 
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+function fetchWithTimeout(url, options, timeoutMs = FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(timeoutId));
+}
+
+function cleanCodeResponse(text) {
+  return text
+    .replace(/```python\n?/g, '')
+    .replace(/```\n?/g, '')
+    .trim();
+}
+
 async function processTextWithAPI(text) {
-  // Retrieve API keys from Chrome storage
   const storage = await chrome.storage.local.get(['openrouterApiKey', 'huggingfaceApiKey']);
   const OPENROUTER_API_KEY = storage.openrouterApiKey;
   const HUGGINGFACE_API_KEY = storage.huggingfaceApiKey;
 
+  if (!OPENROUTER_API_KEY && !HUGGINGFACE_API_KEY) {
+    throw new Error('No API keys configured. Please configure at least one API key (OpenRouter or Hugging Face) in extension options.');
+  }
+
   function getBackoffDelay(attempt) {
     return Math.min(RETRY_DELAY_MS * Math.pow(2, attempt), MAX_RETRY_DELAY_MS);
   }
-  
+
   async function callOpenRouter(model, retryAttempt = 0) {
-    if (!OPENROUTER_API_KEY) {
-      throw new Error('OpenRouter API key not configured. Please set it in extension options.');
-    }
     try {
-      const response = await fetch(OPENROUTER_API_URL, {
+      const response = await fetchWithTimeout(OPENROUTER_API_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -70,34 +80,35 @@ async function processTextWithAPI(text) {
           max_tokens: 2000
         })
       });
-      
+
+      if (response.status === 401) {
+        throw new Error('Invalid OpenRouter API key. Please check your key in extension options.');
+      }
+
       if (response.status === 429 && retryAttempt < MAX_RETRIES) {
-        // Exponential backoff with a maximum delay cap
         await delay(getBackoffDelay(retryAttempt));
         return callOpenRouter(model, retryAttempt + 1);
       }
-      
+
       if (!response.ok) {
-        const errorMessage = response.status === 429
-          ? 'Rate limit exceeded after multiple attempts. Please try again later.'
-          : `API request failed with status ${response.status}`;
-        throw new Error(errorMessage);
+        throw new Error(
+          response.status === 429
+            ? 'Rate limit exceeded. Please try again later.'
+            : `OpenRouter API error (${response.status})`
+        );
       }
-      
+
       const data = await response.json();
-      
+
       if (data.choices && data.choices.length > 0 && data.choices[0].message) {
-        let processedText = data.choices[0].message.content;
-        
-        processedText = processedText.replace(/```python\n?/g, '');
-        processedText = processedText.replace(/```\n?/g, '');
-        processedText = processedText.trim();
-        
-        return processedText;
+        return cleanCodeResponse(data.choices[0].message.content);
       }
-      
+
       throw new Error('Invalid API response format');
     } catch (error) {
+      if (error.name === 'AbortError') {
+        throw new Error(`Request to ${model} timed out`);
+      }
       if (error instanceof TypeError && retryAttempt < MAX_RETRIES) {
         await delay(getBackoffDelay(retryAttempt));
         return callOpenRouter(model, retryAttempt + 1);
@@ -105,13 +116,10 @@ async function processTextWithAPI(text) {
       throw error;
     }
   }
-  
+
   async function callHuggingFace(model, retryAttempt = 0) {
-    if (!HUGGINGFACE_API_KEY) {
-      throw new Error('Hugging Face API key not configured. Please set it in extension options.');
-    }
     try {
-      const response = await fetch(`${HUGGINGFACE_API_URL}/${model}`, {
+      const response = await fetchWithTimeout(`${HUGGINGFACE_API_URL}/${model}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -126,38 +134,39 @@ async function processTextWithAPI(text) {
           }
         })
       });
-      
+
+      if (response.status === 401) {
+        throw new Error('Invalid Hugging Face API key. Please check your key in extension options.');
+      }
+
       if (response.status === 429 && retryAttempt < MAX_RETRIES) {
         await delay(getBackoffDelay(retryAttempt));
         return callHuggingFace(model, retryAttempt + 1);
       }
-      
+
       if (response.status === 503) {
-        // Model is loading, throw error to try next model
         throw new Error('Model is loading');
       }
-      
+
       if (!response.ok) {
-        const errorMessage = response.status === 429
-          ? 'Rate limit exceeded'
-          : `Hugging Face API request failed with status ${response.status}`;
-        throw new Error(errorMessage);
+        throw new Error(
+          response.status === 429
+            ? 'Rate limit exceeded'
+            : `Hugging Face API error (${response.status})`
+        );
       }
-      
+
       const data = await response.json();
-      
+
       if (Array.isArray(data) && data.length > 0 && data[0].generated_text) {
-        let processedText = data[0].generated_text;
-        
-        processedText = processedText.replace(/```python\n?/g, '');
-        processedText = processedText.replace(/```\n?/g, '');
-        processedText = processedText.trim();
-        
-        return processedText;
+        return cleanCodeResponse(data[0].generated_text);
       }
-      
+
       throw new Error('Invalid Hugging Face API response format');
     } catch (error) {
+      if (error.name === 'AbortError') {
+        throw new Error(`Request to ${model} timed out`);
+      }
       if (error instanceof TypeError && retryAttempt < MAX_RETRIES) {
         await delay(getBackoffDelay(retryAttempt));
         return callHuggingFace(model, retryAttempt + 1);
@@ -165,38 +174,44 @@ async function processTextWithAPI(text) {
       throw error;
     }
   }
-  
-  // Try OpenRouter models first (best coding models first) if API key is configured
-  if (OPENROUTER_API_KEY) {
-    for (let i = 0; i < OPENROUTER_MODELS.length; i++) {
-      try {
-        return await callOpenRouter(OPENROUTER_MODELS[i]);
-      } catch (error) {
-        console.error(`OpenRouter model ${OPENROUTER_MODELS[i]} failed:`, error.message);
-        // Continue to next model
-      }
-    }
-  }
-  
-  // If all OpenRouter models fail or no key is configured, fall back to Hugging Face models
-  if (HUGGINGFACE_API_KEY) {
-    console.log(OPENROUTER_API_KEY ? 'All OpenRouter models failed, trying Hugging Face models...' : 'No OpenRouter API key configured, using Hugging Face models...');
-    for (let i = 0; i < HUGGINGFACE_MODELS.length; i++) {
-      try {
-        return await callHuggingFace(HUGGINGFACE_MODELS[i]);
-      } catch (error) {
-        console.error(`Hugging Face model ${HUGGINGFACE_MODELS[i]} failed:`, error.message);
-        // If this is the last model, throw the error
-        if (i === HUGGINGFACE_MODELS.length - 1) {
-          throw error;
+
+  // Wrap the entire model-fallback loop in an overall timeout
+  const overallTimeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Processing timed out. Please try again.')), OVERALL_TIMEOUT_MS)
+  );
+
+  const processModels = async () => {
+    let lastError = null;
+
+    if (OPENROUTER_API_KEY) {
+      for (const model of OPENROUTER_MODELS) {
+        try {
+          return await callOpenRouter(model);
+        } catch (error) {
+          lastError = error;
+          // Stop trying more models if the API key itself is invalid
+          if (error.message.includes('Invalid OpenRouter API key')) throw error;
+          console.warn(`OpenRouter model ${model} failed:`, error.message);
         }
-        // Otherwise, try the next model
       }
     }
-  }
-  
-  // If we reach here, no API keys are configured
-  throw new Error('No API keys configured. Please configure at least one API key (OpenRouter or Hugging Face) in extension options.');
+
+    if (HUGGINGFACE_API_KEY) {
+      for (const model of HUGGINGFACE_MODELS) {
+        try {
+          return await callHuggingFace(model);
+        } catch (error) {
+          lastError = error;
+          if (error.message.includes('Invalid Hugging Face API key')) throw error;
+          console.warn(`Hugging Face model ${model} failed:`, error.message);
+        }
+      }
+    }
+
+    throw lastError || new Error('All models failed. Please try again later.');
+  };
+
+  return Promise.race([processModels(), overallTimeout]);
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {

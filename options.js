@@ -14,51 +14,63 @@ document.addEventListener('DOMContentLoaded', async () => {
 // Save settings when the form is submitted
 document.getElementById('optionsForm').addEventListener('submit', async (e) => {
   e.preventDefault();
-  
+
+  const saveButton = e.target.querySelector('button[type="submit"]');
   const openrouterApiKey = document.getElementById('openrouterApiKey').value.trim();
   const huggingfaceApiKey = document.getElementById('huggingfaceApiKey').value.trim();
-  
+
   // Validate that at least one API key is provided
   if (!openrouterApiKey && !huggingfaceApiKey) {
     showStatus('Please provide at least one API key.', 'error');
     return;
   }
-  
-  // Save to Chrome storage
+
+  // Basic format validation
+  if (openrouterApiKey && !openrouterApiKey.startsWith('sk-or-')) {
+    showStatus('OpenRouter API key should start with "sk-or-". Please check your key.', 'error');
+    return;
+  }
+
+  if (huggingfaceApiKey && !huggingfaceApiKey.startsWith('hf_')) {
+    showStatus('Hugging Face API key should start with "hf_". Please check your key.', 'error');
+    return;
+  }
+
+  // Disable button while saving
+  saveButton.disabled = true;
+  saveButton.textContent = 'Saving…';
+
   try {
-    // Get current storage to check what exists
     const currentStorage = await chrome.storage.local.get(['openrouterApiKey', 'huggingfaceApiKey']);
     const dataToSave = {};
     const keysToRemove = [];
-    
-    // Only save non-empty API keys
+
     if (openrouterApiKey) {
       dataToSave.openrouterApiKey = openrouterApiKey;
     } else if (currentStorage.openrouterApiKey) {
-      // Only remove the key from storage if it existed
       keysToRemove.push('openrouterApiKey');
     }
-    
+
     if (huggingfaceApiKey) {
       dataToSave.huggingfaceApiKey = huggingfaceApiKey;
     } else if (currentStorage.huggingfaceApiKey) {
-      // Only remove the key from storage if it existed
       keysToRemove.push('huggingfaceApiKey');
     }
-    
-    // Save non-empty keys to storage
+
     if (Object.keys(dataToSave).length > 0) {
       await chrome.storage.local.set(dataToSave);
     }
-    
-    // Remove empty keys from storage
+
     if (keysToRemove.length > 0) {
       await chrome.storage.local.remove(keysToRemove);
     }
-    
+
     showStatus('Settings saved successfully!', 'success');
   } catch (error) {
     showStatus('Error saving settings: ' + error.message, 'error');
+  } finally {
+    saveButton.disabled = false;
+    saveButton.textContent = 'Save Settings';
   }
 });
 
