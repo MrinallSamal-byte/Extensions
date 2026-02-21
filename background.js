@@ -176,9 +176,10 @@ async function processTextWithAPI(text) {
   }
 
   // Wrap the entire model-fallback loop in an overall timeout
-  const overallTimeout = new Promise((_, reject) =>
-    setTimeout(() => reject(new Error('Processing timed out. Please try again.')), OVERALL_TIMEOUT_MS)
-  );
+  let overallTimeoutId;
+  const overallTimeout = new Promise((_, reject) => {
+    overallTimeoutId = setTimeout(() => reject(new Error('Processing timed out. Please try again.')), OVERALL_TIMEOUT_MS);
+  });
 
   const processModels = async () => {
     let lastError = null;
@@ -211,7 +212,8 @@ async function processTextWithAPI(text) {
     throw lastError || new Error('All models failed. Please try again later.');
   };
 
-  return Promise.race([processModels(), overallTimeout]);
+  return Promise.race([processModels(), overallTimeout])
+    .finally(() => clearTimeout(overallTimeoutId));
 }
 
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {

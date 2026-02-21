@@ -2,42 +2,6 @@ let originalText = '';
 let processedText = '';
 let isProcessing = false;
 
-// Notification element for user feedback
-let notificationEl = null;
-
-function showNotification(message, type) {
-  removeNotification();
-  notificationEl = document.createElement('div');
-  notificationEl.setAttribute('style', [
-    'position:fixed', 'bottom:20px', 'right:20px', 'z-index:2147483647',
-    'padding:10px 18px', 'border-radius:8px', 'font-size:14px',
-    'font-family:-apple-system,BlinkMacSystemFont,sans-serif',
-    'color:#fff', 'box-shadow:0 4px 12px rgba(0,0,0,0.2)',
-    'transition:opacity 0.3s', 'pointer-events:none',
-    type === 'success' ? 'background:#4CAF50'
-      : type === 'error' ? 'background:#f44336'
-      : 'background:#2196F3'
-  ].join(';'));
-  notificationEl.textContent = message;
-  document.body.appendChild(notificationEl);
-}
-
-function removeNotification() {
-  if (notificationEl && notificationEl.parentNode) {
-    notificationEl.parentNode.removeChild(notificationEl);
-  }
-  notificationEl = null;
-}
-
-function fadeOutNotification(delayMs) {
-  setTimeout(() => {
-    if (notificationEl) {
-      notificationEl.style.opacity = '0';
-      setTimeout(removeNotification, 300);
-    }
-  }, delayMs);
-}
-
 document.addEventListener('copy', (event) => {
   try {
     const selection = window.getSelection();
@@ -63,9 +27,7 @@ document.addEventListener('copy', (event) => {
       timestamp: Date.now()
     });
 
-    showNotification('⏳ Processing text…', 'info');
-
-    // Process text in background
+    // Process text silently in background
     chrome.runtime.sendMessage(
       { action: 'processText', text: copiedText },
       (response) => {
@@ -73,8 +35,6 @@ document.addEventListener('copy', (event) => {
 
         if (chrome.runtime.lastError) {
           chrome.storage.local.set({ isProcessing: false });
-          showNotification('⚠️ Extension error — paste will use original text', 'error');
-          fadeOutNotification(3000);
           return;
         }
 
@@ -85,18 +45,12 @@ document.addEventListener('copy', (event) => {
             isProcessing: false
           });
 
-          // Update clipboard with processed text
+          // Silently update clipboard with processed text
           navigator.clipboard.writeText(response.processedText).catch(() => {
             // Paste handler will use stored processedText as fallback
           });
-
-          showNotification('✅ Text processed — ready to paste', 'success');
-          fadeOutNotification(2500);
         } else {
-          const errorMsg = (response && response.error) || 'Processing failed';
           chrome.storage.local.set({ isProcessing: false });
-          showNotification('⚠️ ' + errorMsg, 'error');
-          fadeOutNotification(3000);
         }
       }
     );
@@ -112,12 +66,13 @@ document.addEventListener('copy', (event) => {
   }
 });
 
-// Handle paste — must call preventDefault synchronously before any await
+// Paste handler is synchronous — preventDefault must be called before any async
+// work, so we only check the in-memory cache. The clipboard itself is updated
+// asynchronously via navigator.clipboard.writeText in the copy handler above.
 document.addEventListener('paste', (event) => {
   try {
     const clipboardText = event.clipboardData ? event.clipboardData.getData('text/plain') : '';
 
-    // Fast path: check in-memory processed text (synchronous, no await)
     if (processedText && originalText && clipboardText === originalText) {
       event.preventDefault();
       insertTextAtCursor(processedText);
@@ -125,17 +80,6 @@ document.addEventListener('paste', (event) => {
     }
 
     // If processing is still ongoing, let default paste happen (original text)
-    if (isProcessing) {
-      return;
-    }
-
-    // Async fallback: check Chrome storage for cross-tab scenarios
-    // We must decide synchronously whether to preventDefault,
-    // so only preventDefault if we had in-memory match (above).
-    // For the async storage path, we pre-read storage on every copy
-    // and rely on the in-memory cache. If a cross-tab scenario is needed,
-    // the clipboard itself should already have the processed text via
-    // navigator.clipboard.writeText in the copy handler.
   } catch (error) {
     // On error, let default paste behavior handle it
   }
